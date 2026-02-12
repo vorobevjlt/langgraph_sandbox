@@ -1,0 +1,16 @@
+LangGraph
+1)react_pipeline
+    A: from langchain_google_genai import ChatGoogleGenerativeAI
+    B: from lang.chain.agents import initialize_agent, tool
+    C: from langchain_community.tools import TavilySearchResults
+https://github.com/harishneel1/langgraph/blob/main/1_Introduction/react_agent_basic.py
+A simple LangChain ReAct agent using Gemini, augmented with a web search tool for real-time 
+facts and a custom time tool to compute elapsed time from the present, built using the default 
+initialize_agent zero-shot ReAct configuration.
+
+2)reflection_system
+    A: from langchain_core.messages import BaseMessage, HumanMessage
+    B: from langgraph.graph import END, MessageGraph
+    C: from langchain_core.prompt import ChatPromptTemplate, MessagePlaceholder
+https://github.com/harishneel1/langgraph/blob/main/2_basic_reflection_system/basic.py
+
