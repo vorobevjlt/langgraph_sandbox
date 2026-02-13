@@ -1,56 +1,101 @@
 import os
+from typing import List
+
 from langchain_community.document_loaders import WebBaseLoader
-from langchain_text_splitters import CharacterTextSplitter
-from langchain_openai import OpenAIEmbeddings
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 from langchain_chroma import Chroma
-from settings import settings
+from langchain_core.documents import Document
+from langchain_core.messages import HumanMessage, SystemMessage
 
-def load_documents(url):
+from src.sandbox.settings import settings
+
+URL = "https://docs.langchain.com/oss/python/langchain/rag#rag-chains"
+PERSIST_DIRECTORY = "./db/chroma_db"
+BASE_URL = "https://api.proxyapi.ru/openai/v1"
+
+def load_documents(url: str) -> List[Document]:
     loader = WebBaseLoader(url)
-    document = loader.load()
-    return document
+    return loader.load()
 
-def split_documents(docs, chunk_size=100, chunk_overlap=0):
-    text_splitter = CharacterTextSplitter(
-        chunk_size=chunk_size,
-        chunk_overlap=chunk_overlap
+def split_documents(docs: List[Document]) -> List[Document]:
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50,
+        add_start_index=True,
     )
+    return splitter.split_documents(docs)
 
-    chunks = text_splitter.split_documents(docs) 
-    return chunks
-
-def create_vector_store(chunks, persist_derictory="./db/chroma_db"):
-    embeddings_model = OpenAIEmbeddings(
+def get_embeddings() -> OpenAIEmbeddings:
+    return OpenAIEmbeddings(
         api_key=settings.OPENAI_API_KEY,
-        base_url=settings.OPENAI_BASE_URL,
+        base_url=BASE_URL,
     )
-    vector_store = Chroma.from_documents(
-        documents=chunks,
-        embedding=embeddings_model,
-        persist_derictory=persist_derictory,
+
+def build_or_load_vectorstore() -> Chroma:
+    embeddings = get_embeddings()
+
+    vector_store = Chroma(
+        persist_directory=PERSIST_DIRECTORY,
+        embedding_function=embeddings,
         collection_metadata={"hnsw:space": "cosine"},
     )
+
+    if vector_store._collection.count() == 0:
+        print("Creating new vector store...")
+        documents = load_documents(URL)
+        chunks = split_documents(documents)
+
+        vector_store.add_documents(chunks)
+        vector_store.persist()
+        print(f"Stored {len(chunks)} chunks.")
+
+    else:
+        print("Loaded existing vector store.")
+
     return vector_store
 
-def main():
-    URL = "https://docs.langchain.com/oss/python/langchain/rag#rag-chains"
-    persist_derictory = "./db/chroma_db"
-    if os.path.exists(persist_derictory):
-        embeddings_model = OpenAIEmbeddings(
-            api_key=settings.OPENAI_API_KEY,
-            base_url=settings.OPENAI_BASE_URL,
-        )
-        vector_store = Chroma(
-            persist_derictory=persist_derictory,
-            embedding_function=embedding_model,
-            collection_metadata={"hnsw:space": "cosine"}
-        )   
-        return vectorstore
-    
-    documents = load_documents(URL)
-    chunks = split_documents(documents)
-    vector_store = create_vector_store(chunks, persist_derictory)
-    return vector_store
+def run_rag_query(query: str) -> str:
+    db = build_or_load_vectorstore()
+    retriever = db.as_retriever(search_kwargs={"k": 5})
+    relevant_docs = retriever.invoke(query)
 
-print(main())
+    formatted_docs = "\n\n".join(
+        f"Document {i+1}:\n{doc.page_content[:1000]}"
+        for i, doc in enumerate(relevant_docs)
+    )
 
+    prompt = f"""
+        Use ONLY the information from the documents below to answer the question.
+
+        Question:
+        {query}
+
+        Documents:
+        {formatted_docs}
+
+        If the answer is not contained in the documents, say:
+        "I don't have enough information to answer that question based on the provided documents."
+    """
+
+    llm = ChatOpenAI(
+        model="gpt-5.2",
+        temperature=0.1,
+        api_key=settings.OPENAI_API_KEY,
+        base_url=BASE_URL,
+        max_retries=2,
+    )
+
+    messages = [
+        SystemMessage(content="You are a precise RAG assistant."),
+        HumanMessage(content=prompt),
+    ]
+
+    response = llm.invoke(messages)
+    return response.content
+
+
+if __name__ == "__main__":
+    answer = run_rag_query("What is a RAG chain?")
+    print("\nAnswer:\n")
+    print(answer)
