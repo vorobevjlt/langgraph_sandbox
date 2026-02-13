@@ -1,87 +1,101 @@
+import os
+from typing import List
+
+from langchain_community.document_loaders import WebBaseLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
+from langchain_chroma import Chroma
+from langchain_core.documents import Document
 from langchain_core.messages import HumanMessage, SystemMessage
-from langchain_openai import ChatOpenAI
-from langgraph.graph import MessagesState
-from langgraph.graph import START, StateGraph
-from langgraph.prebuilt import ToolNode
-from langgraph.prebuilt import tools_condition
 
-from settings import settings
+from src.sandbox.settings import settings
 
+URL = "https://docs.langchain.com/oss/python/langchain/rag#rag-chains"
+PERSIST_DIRECTORY = "./db/chroma_db"
+BASE_URL = "https://api.proxyapi.ru/openai/v1"
 
-# Арифметические инструменты
-def multiply(a: int, b: int) -> int:
-    """Multiply a and b.
+def load_documents(url: str) -> List[Document]:
+    loader = WebBaseLoader(url)
+    return loader.load()
 
-     Args:
-         a: first int
-         b: second int
-     """
-    return a * b
+def split_documents(docs: List[Document]) -> List[Document]:
+    splitter = RecursiveCharacterTextSplitter(
+        chunk_size=500,
+        chunk_overlap=50,
+        add_start_index=True,
+    )
+    return splitter.split_documents(docs)
 
+def get_embeddings() -> OpenAIEmbeddings:
+    return OpenAIEmbeddings(
+        api_key=settings.OPENAI_API_KEY,
+        base_url=BASE_URL,
+    )
 
-def add(a: int, b: int) -> int:
-    """Adds a and b.
+def build_or_load_vectorstore() -> Chroma:
+    embeddings = get_embeddings()
 
-    Args:
-        a: first int
-        b: second int
+    vector_store = Chroma(
+        persist_directory=PERSIST_DIRECTORY,
+        embedding_function=embeddings,
+        collection_metadata={"hnsw:space": "cosine"},
+    )
+
+    if vector_store._collection.count() == 0:
+        print("Creating new vector store...")
+        documents = load_documents(URL)
+        chunks = split_documents(documents)
+
+        vector_store.add_documents(chunks)
+        vector_store.persist()
+        print(f"Stored {len(chunks)} chunks.")
+
+    else:
+        print("Loaded existing vector store.")
+
+    return vector_store
+
+def run_rag_query(query: str) -> str:
+    db = build_or_load_vectorstore()
+    retriever = db.as_retriever(search_kwargs={"k": 5})
+    relevant_docs = retriever.invoke(query)
+
+    formatted_docs = "\n\n".join(
+        f"Document {i+1}:\n{doc.page_content[:1000]}"
+        for i, doc in enumerate(relevant_docs)
+    )
+
+    prompt = f"""
+        Use ONLY the information from the documents below to answer the question.
+
+        Question:
+        {query}
+
+        Documents:
+        {formatted_docs}
+
+        If the answer is not contained in the documents, say:
+        "I don't have enough information to answer that question based on the provided documents."
     """
-    return a + b
+
+    llm = ChatOpenAI(
+        model="gpt-5.2",
+        temperature=0.1,
+        api_key=settings.OPENAI_API_KEY,
+        base_url=BASE_URL,
+        max_retries=2,
+    )
+
+    messages = [
+        SystemMessage(content="You are a precise RAG assistant."),
+        HumanMessage(content=prompt),
+    ]
+
+    response = llm.invoke(messages)
+    return response.content
 
 
-def divide(a: int, b: int) -> float:
-    """Divide a and b.
-
-    Args:
-        a: first int
-        b: second int
-    """
-    return a / b
-
-
-tools = [add, multiply, divide]
-
-# Инициализация модели
-llm = ChatOpenAI(
-    model="gpt-5.2",
-    api_key=settings.OPENAI_API_KEY,
-    temperature=0.1,
-    max_retries=2,
-    base_url="https://api.proxyapi.ru/openai/v1"
-)
-
-llm_with_tools = llm.bind_tools(tools)
-
-sys_msg = SystemMessage(content="Ты помощник для выполнения арифметических операций.")
-
-
-def assistant(state: MessagesState) -> MessagesState:
-    return {"messages": [llm_with_tools.invoke([sys_msg] + state["messages"])]}
-
-
-tools_node = ToolNode(tools=tools)
-
-builder = StateGraph(MessagesState)
-
-# Добавление узлов
-builder.add_node("assistant", assistant)
-builder.add_node("tools", tools_node)
-
-# Определение рёбер
-builder.add_edge(START, "assistant")
-builder.add_conditional_edges(
-    "assistant",
-    # Если последнее сообщение - вызов инструмента → переход к tools
-    # Если не вызов инструмента → переход к END
-    tools_condition
-)
-builder.add_edge("tools", "assistant")  # Ключевое ребро цикла
-
-react_graph = builder.compile()
-
-if __name__ == '__main__':
-    messages = [HumanMessage(content="Сложи 5 и 5. Умножь результат на 5. Раздели результат на 5")]
-    result = react_graph.invoke({"messages": messages})
-
-    for m in result['messages']:
-        m.pretty_print()
+if __name__ == "__main__":
+    answer = run_rag_query("What is a RAG chain?")
+    print("\nAnswer:\n")
+    print(answer)

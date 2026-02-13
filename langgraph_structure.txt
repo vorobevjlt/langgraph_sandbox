@@ -3,14 +3,28 @@ LangGraph
     A: from langchain_google_genai import ChatGoogleGenerativeAI
     B: from lang.chain.agents import initialize_agent, tool
     C: from langchain_community.tools import TavilySearchResults
-https://github.com/harishneel1/langgraph/blob/main/1_Introduction/react_agent_basic.py
-A simple LangChain ReAct agent using Gemini, augmented with a web search tool for real-time 
-facts and a custom time tool to compute elapsed time from the present, built using the default 
-initialize_agent zero-shot ReAct configuration.
+https://github.com/vorobevjlt/langgraph_sandbox/blob/main/src/sandbox/basic_react.py
+In this code, we define several arithmetic tools (add, multiply, divide)
+and bind them to a ChatOpenAI model using LangChain’s tool-calling mechanism.
+We create a system message that instructs the model to behave as a mathematical helper. 
+When the assistant node runs, it combines the system message with the current conversation state 
+and invokes the LLM with tool support enabled.
 
 2)reflection_system
     A: from langchain_core.messages import BaseMessage, HumanMessage
     B: from langgraph.graph import END, MessageGraph
     C: from langchain_core.prompt import ChatPromptTemplate, MessagePlaceholder
-https://github.com/harishneel1/langgraph/blob/main/2_basic_reflection_system/basic.py
-
+https://github.com/vorobevjlt/langgraph_sandbox/blob/main/src/sandbox/basic_reflection.py
+First, we define two roles: a writer and a critic. 
+The writer generates a Twitter post based on the user’s prompt, 
+and the critic reviews that post and gives feedback with suggestions on how to improve it.
+The graph starts with the generation step. The model creates a tweet using the user’s input. 
+Then, depending on how many messages are already in the state, 
+we decide whether to continue the loop or stop.
+If we continue, the reflection step runs. 
+The critic analyzes the generated tweet and provides detailed feedback. 
+That feedback is then passed back into the generation step as a new message, 
+so the writer can improve the previous version.
+This loop continues for a limited number of iterations (based on message length), 
+allowing the tweet to get refined each time. 
+Once the condition is met, the process stops and returns the final result.

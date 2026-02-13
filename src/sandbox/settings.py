@@ -6,7 +6,7 @@ current_file = Path(__file__).resolve()
 
 current_dir = current_file.parent
 
-env_path = current_dir.parent / ".env"
+env_path = current_dir.parent.parent / ".env"
 
 
 class Settings(BaseSettings):
@@ -16,11 +16,10 @@ class Settings(BaseSettings):
     LANGSMITH_PROJECT: str
 
     OPENAI_API_KEY: SecretStr
-    TAVILY_API_KEY: SecretStr
+    OPENAI_BASE_URL: SecretStr
     model_config = SettingsConfigDict(env_file=env_path, env_file_encoding="utf-8")
-
-
+    
 settings = Settings()
 
 if __name__ == "__main__":
-    print(settings.model_dump())
+    print(env_path)

@@ -41,7 +41,6 @@ def divide(a: int, b: int) -> float:
 
 tools = [add, multiply, divide]
 
-# Инициализация модели
 llm = ChatOpenAI(
     model="gpt-5.2",
     api_key=settings.OPENAI_API_KEY,
@@ -52,7 +51,7 @@ llm = ChatOpenAI(
 
 llm_with_tools = llm.bind_tools(tools)
 
-sys_msg = SystemMessage(content="Ты помощник для выполнения арифметических операций.")
+sys_msg = SystemMessage(content="You mathematical helper to solve calculation problems")
 
 
 def assistant(state: MessagesState) -> MessagesState:
@@ -63,24 +62,20 @@ tools_node = ToolNode(tools=tools)
 
 builder = StateGraph(MessagesState)
 
-# Добавление узлов
 builder.add_node("assistant", assistant)
 builder.add_node("tools", tools_node)
 
-# Определение рёбер
 builder.add_edge(START, "assistant")
 builder.add_conditional_edges(
     "assistant",
-    # Если последнее сообщение - вызов инструмента → переход к tools
-    # Если не вызов инструмента → переход к END
     tools_condition
 )
-builder.add_edge("tools", "assistant")  # Ключевое ребро цикла
+builder.add_edge("tools", "assistant")  
 
 react_graph = builder.compile()
 
 if __name__ == '__main__':
-    messages = [HumanMessage(content="Сложи 5 и 5. Умножь результат на 5. Раздели результат на 5")]
+    messages = [HumanMessage(content="multiply 5 on 5. Then multiply result on 5. Then divide result on 3")]
     result = react_graph.invoke({"messages": messages})
 
     for m in result['messages']:
