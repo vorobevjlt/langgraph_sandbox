@@ -12,7 +12,6 @@ from src.sandbox.settings import settings
 
 URL = "https://docs.langchain.com/oss/python/langchain/rag#rag-chains"
 PERSIST_DIRECTORY = "./db/chroma_db"
-BASE_URL = "https://api.proxyapi.ru/openai/v1"
 
 def load_documents(url: str) -> List[Document]:
     loader = WebBaseLoader(url)
@@ -29,7 +28,7 @@ def split_documents(docs: List[Document]) -> List[Document]:
 def get_embeddings() -> OpenAIEmbeddings:
     return OpenAIEmbeddings(
         api_key=settings.OPENAI_API_KEY,
-        base_url=BASE_URL,
+        base_url=settings.OPENAI_BASE_URL,
     )
 
 def build_or_load_vectorstore() -> Chroma:
@@ -82,7 +81,7 @@ def run_rag_query(query: str) -> str:
         model="gpt-5.2",
         temperature=0.1,
         api_key=settings.OPENAI_API_KEY,
-        base_url=BASE_URL,
+        base_url=settings.OPENAI_BASE_URL,
         max_retries=2,
     )
 
