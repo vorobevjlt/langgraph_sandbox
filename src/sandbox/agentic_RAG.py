@@ -31,24 +31,33 @@ tools = [fetch_documentation]
 model = ChatOpenAI(
     model="gpt-5.2",
     temperature=0.1,
+    max_tokens=200,
     api_key=settings.OPENAI_API_KEY,
     base_url="https://api.proxyapi.ru/openai/v1",
-    max_retries=2,
 )
 
 agent = create_agent(
     model=model,
     tools=tools,
     system_prompt=system_prompt,
-    name="Agentic RAG",
+    name="Agentic_RAG",
 )
 
-async def main():
-    user_message = HumanMessage('Give me most important core Agent components. Answer short and percist')
+print(asyncio.run(agent.ainvoke(
+    {
+        "messages": [
+            {"role": "user", "content": "how are you"}
+        ]
+    }
+)))
 
-    async for chunk in agent.astream({"messages": [user_message]}):
-        print(chunk)
+
+# async def main():
+#     user_message = HumanMessage('Give me most important core Agent components. Answer short and percist')
+
+#     async for chunk in agent.astream({"messages": [user_message]}):
+#         print(chunk)
 
 
-if __name__ == '__main__':
-    asyncio.run(main())
+# if __name__ == '__main__':
+#     asyncio.run(main())
