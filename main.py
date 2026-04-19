@@ -1,75 +1,121 @@
-import random
-import numpy as np
-with open('/Users/justlikethat/langgraph-course/resourses/artical_web_rag.txt','r') as file:
-    text = " ".join(line.rstrip() for line in file)
+from typing_extensions import TypedDict
+from langgraph.graph import StateGraph, START, END
 
-s = text
+from langchain_community.document_loaders.recursive_url_loader import RecursiveUrlLoader
+from langchain_text_splitters import RecursiveCharacterTextSplitter
+from langchain_core.vectorstores import InMemoryVectorStore
+from langchain_openai import OpenAIEmbeddings, ChatOpenAI
 
-def rand_vec(dim):
-    return np.random.uniform(-3.0, 3.0, size=dim)
 
-def logsumexp(x):
-    m = np.max(x)
-    return m + np.log(np.sum(np.exp(x - m)))
+# ---------- 1) ingest one site ----------
+loader = RecursiveUrlLoader(
+    "https://avito.ru",
+    max_depth=2,
+    prevent_outside=True,
+)
 
-def softmax(x):
-    x = x - np.max(x)
-    e = np.exp(x)
-    return e / e.sum()
-dim = 3
-lr = 0.05
-s = text
-# d[word] = (v_w, u_w)  center vec, context 
-d = {}
-# s is whole corpus
-for tok in s:
-    if tok not in d:
-        d[tok] = (rand_vec(dim), rand_vec(dim))
-vocab = list(d.keys())
-w2i = {w:i for i,w in enumerate(vocab)}
-V = np.stack([d[w][0] for w in vocab], axis=0)  # center vectors (|V|, dim)
-U = np.stack([d[w][1] for w in vocab], axis=0)  # context vectors (|V|, dim
-for _ in range(100):
-    for i in range(len(s) - 5 + 1): 
-        win = s[i:i+5]
-        c_word = win[2]
-        c = w2i[c_word]
-    
-        for j, t_word in enumerate(win):
-            if j == 2: 
-                continue
-            t = w2i[t_word]
-    
-            v_c = V[c]                 # (dim,)
-            z = U @ v_c                # (|V|,)
-            p = softmax(z)             # (|V|,)
-    
-            # g = p - y
-            g = p.copy()
-            g[t] -= 1.0                # (|V|,)
-    
-            # gradients
-            grad_v = U.T @ g           # (dim,)
-            grad_U = np.outer(g, v_c)  # (|V|, dim)
-    
-            # SGD step
-            V[c] -= lr * grad_v
-            U    -= lr * grad_U
-    loss = 0.0
-    pair_count = 0
-    for i in range(len(s) - 5 + 1):
-        win = s[i:i+5]
-        center = win[2]
-        v_center = d[center][0]     # v_w
-        logits = U @ v_center       # (|V|,)  logits for all context words
-        logZ = logsumexp(logits)    # log sum exp over vocab
-        for j, ctx in enumerate(win):
-            if j == 2:
-                continue
-            # log p(ctx | center) = (u_ctx·v_center) - logZ
-            u_ctx = d[ctx][1]
-            loss -= (u_ctx @ v_center) - logZ   # negative log-likelihood
-            pair_count += 1
-    
-    avg_loss = loss / max(pair_count, 1)
-    print("loss:", loss, "avg_loss:", avg_loss, "pairs:", pair_count)
+pages = loader.load()
+print(pages)
+# # Optional: enrich metadata before splitting
+# for d in pages:
+#     d.metadata["site"] = "example-docs"
+#     d.metadata["section"] = d.metadata.get("title", "")
+
+# splitter = RecursiveCharacterTextSplitter(
+#     chunk_size=1200,
+#     chunk_overlap=200,
+# )
+
+# chunks = splitter.split_documents(pages)
+
+# # give every chunk a stable citation id
+# for i, d in enumerate(chunks, start=1):
+#     d.metadata["chunk_id"] = i
+
+# # ---------- 2) build retriever ----------
+# vectorstore = InMemoryVectorStore.from_documents(
+#     documents=chunks,
+#     embedding=OpenAIEmbeddings(),
+# )
+# retriever = vectorstore.as_retriever(search_kwargs={"k": 8})
+
+
+# # ---------- 3) LangGraph state ----------
+# class SiteQAState(TypedDict):
+#     question: str
+#     docs: list
+#     answer: str
+#     citations: list
+
+
+# def retrieve_node(state: SiteQAState):
+#     docs = retriever.invoke(state["question"])
+#     return {"docs": docs}
+
+
+# def answer_node(state: SiteQAState):
+#     context_blocks = []
+#     citations = []
+
+#     for idx, d in enumerate(state["docs"], start=1):
+#         url = d.metadata.get("source", "")
+#         title = d.metadata.get("title", "")
+#         chunk_id = d.metadata.get("chunk_id")
+
+#         context_blocks.append(
+#             f"[{idx}] TITLE: {title}\n"
+#             f"URL: {url}\n"
+#             f"CHUNK_ID: {chunk_id}\n"
+#             f"CONTENT:\n{d.page_content}"
+#         )
+
+#         citations.append(
+#             {
+#                 "ref": idx,
+#                 "url": url,
+#                 "title": title,
+#                 "chunk_id": chunk_id,
+#             }
+#         )
+
+#     prompt = f"""
+# You answer questions using ONLY the provided context.
+
+# Rules:
+# - Every important claim must cite one or more refs like [1] or [2][4].
+# - Never cite anything not in the context.
+# - If the context is insufficient, say you don't know.
+# - Prefer multiple refs when the answer is supported by more than one page.
+
+# Question:
+# {state["question"]}
+
+# Context:
+# {chr(10).join(context_blocks)}
+# """.strip()
+
+#     llm = ChatOpenAI(model="gpt-5")
+#     answer = llm.invoke(prompt).content
+
+#     return {
+#         "answer": answer,
+#         "citations": citations,
+#     }
+
+
+# # ---------- 4) graph ----------
+# builder = StateGraph(SiteQAState)
+# builder.add_node("retrieve", retrieve_node)
+# builder.add_node("answer", answer_node)
+
+# builder.add_edge(START, "retrieve")
+# builder.add_edge("retrieve", "answer")
+# builder.add_edge("answer", END)
+
+# app = builder.compile()
+
+# # ---------- 5) run ----------
+# result = app.invoke({"question": "How does authentication work?"})
+
+# print(result["answer"])
+# print(result["citations"])
